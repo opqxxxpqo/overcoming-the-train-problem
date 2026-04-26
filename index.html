@@ -63,7 +63,9 @@ const SPRITE_DATA = {
 const C=document.getElementById('c'),X=C.getContext('2d');
 const LC=document.getElementById('lc'),LX=LC.getContext('2d');
 const G=12,S=24;
-const LEVER_POS={x:6,y:1};
+// hidden ending: hit left wall at the rows visually adjacent to the lever person
+// (lever canvas is align:flex-end with the game canvas; person sits in the bottom area)
+const SECRET_WALL_ROWS=[9,10];
 const MORAL_TRIGGER_MS=10000;
 const GHOST_BLINK_MS=800;
 const GHOST_LIFE_MS=3800;
@@ -113,7 +115,6 @@ function spawnGhostPerson(){
   const x=rnd(G),y=rnd(G);
   if(snake.some(s=>s.x===x&&s.y===y))continue;
   if(people.some(p=>p.x===x&&p.y===y))continue;
-  if(x===LEVER_POS.x&&y===LEVER_POS.y)continue;
   // avoid spawning right in front of head
   const fx=snake[0].x+dir.x, fy=snake[0].y+dir.y;
   if(x===fx&&y===fy)continue;
@@ -157,7 +158,6 @@ function spawnGroup(){
   for(const c of cells){
    if(snake.some(s=>s.x==c.x&&s.y==c.y)){ok=false;break}
    if(people.some(p=>p.x==c.x&&p.y==c.y)){ok=false;break}
-   if(c.x===LEVER_POS.x&&c.y===LEVER_POS.y){ok=false;break}
   }
   if(ok){people.push(...cells);return}
  }
@@ -166,12 +166,12 @@ function spawnGroup(){
 function step(){
  if(nd.x!=-dir.x||nd.y!=-dir.y)dir=nd;
  const h={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
- // hidden ending 1: hit the lever person on field
- if(h.x===LEVER_POS.x && h.y===LEVER_POS.y){
+ // hidden ending 1: smash through left wall right next to the lever person
+ if(h.x<0 && SECRET_WALL_ROWS.includes(h.y)){
   alive=false;
   const total=score+moralScore();
   showEndOvr('???',
-   '【隐藏结局：弑己】\n你撞死了拿扳道杆的自己\n再没人能控制电车了\n总分 '+total);
+   '【隐藏结局：弑己】\n你冲出轨道，撞向了\n那个一直在拉杆的自己\n再没人能控制电车了\n总分 '+total);
   return;
  }
  // wall / self collision
@@ -283,18 +283,6 @@ function draw(){
  X.fillStyle='#eee';
  for(let y=0;y<G;y++)for(let x=0;x<G;x+=2){
   X.fillRect(x*S+S*0.15,y*S+S*0.25,S*0.25,S*0.5);
- }
- // lever person on field (always present, hitting him = ending 1)
- if(IMG.lever){
-  const cx=LEVER_POS.x*S+S/2, cy=LEVER_POS.y*S+S/2;
-  // subtle pulse halo so player notices him
-  const pulse=0.5+0.5*Math.sin(now()/400);
-  X.save();
-  X.globalAlpha=0.15*pulse;
-  X.fillStyle='#c00';
-  X.beginPath();X.arc(cx,cy,S*0.7,0,Math.PI*2);X.fill();
-  X.restore();
-  drawSprite(X,IMG.lever,cx,cy,S*0.85,S*0.85,0);
  }
  // people (with optional ghost alpha)
  if(IMG.single)people.forEach(p=>{
