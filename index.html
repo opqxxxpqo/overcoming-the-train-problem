@@ -159,7 +159,8 @@ let people=[];
 let score=0,combo=0,tick=0,speed=26,paused=true,alive=false;
 let lastHitTime=0,moralMode=false,moralStart=0,lastGhostSpawn=0;
 let countdown=0;
-let driftMode=false;
+let driftMode=false,usedDrift=false,driftEndsAt=0;
+const DRIFT_DURATION_MS=500;
 const rnd=n=>Math.floor(Math.random()*n);
 const now=()=>Date.now();
 
@@ -179,19 +180,24 @@ function prepareGame(){
  dir={x:1,y:0};nd={x:1,y:0};
  people=[];score=0;combo=0;tick=0;
  lastHitTime=now();moralMode=false;moralStart=0;lastGhostSpawn=0;
- driftMode=false;
+ driftMode=false;usedDrift=false;driftEndsAt=0;
  alive=false;
  spawnGroup();spawnGroup();
  updateDriftBtn();
 }
 
 function canDrift(){
- return alive && !driftMode && snake.length===3;
+ return alive && !usedDrift && snake.length===3;
 }
 function activateDrift(){
  if(!canDrift())return;
  driftMode=true;
+ usedDrift=true;
+ driftEndsAt=now()+DRIFT_DURATION_MS;
  updateDriftBtn();
+}
+function tickDrift(){
+ if(alive && driftMode && now()>=driftEndsAt) driftMode=false;
 }
 function partnerCell(c){
  // perpendicular partner (used for both head and body when drifting)
@@ -304,7 +310,7 @@ function step(){
  const dead = oob(h)||onSelf(h) || (p2 && (oob(p2)||onSelf(p2)));
  if(dead){
   alive=false;
-  if(driftMode){
+  if(usedDrift){
    showEndOvr(t('demon_title'), t('demon_text',{n:score}));
   }else if(moralMode){
    const sec=Math.floor((now()-moralStart)/1000);
@@ -347,8 +353,8 @@ function step(){
   snake.pop();
   combo=0;
  }
- // moral mode trigger (drift overrides)
- if(!moralMode && !driftMode && now()-lastHitTime>MORAL_TRIGGER_MS) enterMoralMode();
+ // moral mode trigger (suppressed once drift has ever been used)
+ if(!moralMode && !usedDrift && now()-lastHitTime>MORAL_TRIGGER_MS) enterMoralMode();
  updateDriftBtn();
 }
 
@@ -567,6 +573,7 @@ loadAll().then(()=>{
   if(alive&&!paused){
    tick++;if(tick>=speed){step();tick=0}
    moralTick();
+   tickDrift();
   }
   draw();
   requestAnimationFrame(loop);
