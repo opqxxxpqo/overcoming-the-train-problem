@@ -32,6 +32,11 @@ html,body{width:100%;height:100%;overflow:hidden;background:#222;font-family:'Co
 .pad .u{grid-area:1/2/2/3}.pad .l{grid-area:2/1/3/2}.pad .r{grid-area:2/3/3/4}.pad .d{grid-area:3/2/4/3}
 @media (hover:none) and (pointer:coarse){.pad{display:grid}}
 .tip{font:10px monospace;color:#666;letter-spacing:1px}
+.action-bar{display:none;gap:8px;margin-top:2px}
+.action-bar.show{display:flex}
+.drift-btn{background:#a00;color:#fff;border:0;padding:8px 22px;font:bold 12px monospace;cursor:pointer;letter-spacing:3px;animation:driftPulse 1.4s infinite;border-radius:4px}
+.drift-btn:active{background:#600}
+@keyframes driftPulse{50%{background:#f33;box-shadow:0 0 12px #f33}}
 </style>
 </head>
 <body>
@@ -48,8 +53,9 @@ html,body{width:100%;height:100%;overflow:hidden;background:#222;font-family:'Co
    </div>
   </div>
  </div>
+ <div class="action-bar" id="actionBar"><button class="drift-btn" id="driftBtn" type="button">漂  移  →  恶  魔</button></div>
  <div class="pad" id="pad"><button class="u" data-k="u">▲</button><button class="l" data-k="l">◀</button><button class="r" data-k="r">▶</button><button class="d" data-k="d">▼</button></div>
- <div class="tip">WASD / 方向键</div>
+ <div class="tip">WASD / 方向键 / 空格键漂移</div>
 </div>
 <script>
 const SPRITE_DATA = {
@@ -75,6 +81,7 @@ let people=[];
 let score=0,combo=0,tick=0,speed=26,paused=true,alive=false;
 let lastHitTime=0,moralMode=false,moralStart=0,lastGhostSpawn=0;
 let countdown=0;
+let driftMode=false;
 const rnd=n=>Math.floor(Math.random()*n);
 const now=()=>Date.now();
 
@@ -94,8 +101,27 @@ function prepareGame(){
  dir={x:1,y:0};nd={x:1,y:0};
  people=[];score=0;combo=0;tick=0;
  lastHitTime=now();moralMode=false;moralStart=0;lastGhostSpawn=0;
- spawnGroup();spawnGroup();
+ driftMode=false;
  alive=false;
+ spawnGroup();spawnGroup();
+ updateDriftBtn();
+}
+
+function canDrift(){
+ return alive && !driftMode && snake.length===3;
+}
+function activateDrift(){
+ if(!canDrift())return;
+ driftMode=true;
+ updateDriftBtn();
+}
+function partnerCell(c){
+ // perpendicular partner (used for both head and body when drifting)
+ if(dir.y===0)return {x:c.x, y:c.y+1};
+ return {x:c.x+1, y:c.y};
+}
+function updateDriftBtn(){
+ document.getElementById('actionBar').classList.toggle('show', canDrift());
 }
 
 function reset(){
@@ -186,6 +212,7 @@ function spawnGroup(){
 function step(){
  if(nd.x!=-dir.x||nd.y!=-dir.y)dir=nd;
  const h={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
+ const p2=driftMode?partnerCell(h):null;
  // hidden ending 1: smash through left wall right next to the lever person
  if(h.x<0 && SECRET_WALL_ROWS.includes(h.y)){
   alive=false;
@@ -194,10 +221,16 @@ function step(){
    '【隐藏结局：弑己】\n你冲出轨道，撞向了\n那个一直在拉杆的自己\n再没人能控制电车了\n总分 '+total);
   return;
  }
- // wall / self collision
- if(h.x<0||h.y<0||h.x>=G||h.y>=G||snake.slice(0,-1).some(s=>s.x==h.x&&s.y==h.y)){
+ // OOB / self collision (also check partner cell when drifting)
+ const oob=c=>c.x<0||c.y<0||c.x>=G||c.y>=G;
+ const onSelf=c=>snake.slice(0,-1).some(s=>s.x===c.x&&s.y===c.y);
+ const dead = oob(h)||onSelf(h) || (p2 && (oob(p2)||onSelf(p2)));
+ if(dead){
   alive=false;
-  if(moralMode){
+  if(driftMode){
+   showEndOvr('恶魔结局',
+    '【隐藏结局：恶魔】\n你按下了不该按的按钮\n横扫 '+score+' 个无辜的人\n车毁人亡 你也成了真正的恶魔');
+  }else if(moralMode){
    const sec=Math.floor((now()-moralStart)/1000);
    showEndOvr('GAME OVER','道德高尚 '+sec+' 秒\n撞墙了\n总分 '+(score+moralScore()));
   }else{
@@ -207,21 +240,28 @@ function step(){
   return;
  }
  snake.unshift(h);
- // person collision (only if solid)
- const idx=people.findIndex(p=>p.x===h.x&&p.y===h.y&&ghostSolid(p));
- if(idx>=0){
+ // collect crushable people in head cell + partner cell (only if solid)
+ const hits=[];
+ const idx1=people.findIndex(p=>p.x===h.x&&p.y===h.y&&ghostSolid(p));
+ if(idx1>=0)hits.push(idx1);
+ if(p2){
+  const idx2=people.findIndex((p,i)=>i!==idx1&&p.x===p2.x&&p.y===p2.y&&ghostSolid(p));
+  if(idx2>=0)hits.push(idx2);
+ }
+ if(hits.length){
   if(moralMode){
-   // hidden ending 2 fail: hit a person while ascended
    alive=false;
    const sec=Math.floor((now()-moralStart)/1000);
    showEndOvr('道德破产',
     '【隐藏结局：堕落】\n坚持 '+sec+' 秒后还是没忍住\n总分 '+(score+moralScore()));
    return;
   }
-  people.splice(idx,1);
-  combo++;
-  score+=combo;
-  for(let i=1;i<combo;i++)snake.push({...snake[snake.length-1]});
+  hits.sort((a,b)=>b-a).forEach(i=>people.splice(i,1));
+  for(let i=0;i<hits.length;i++){
+   combo++;
+   score+=combo;
+   for(let j=1;j<combo;j++)snake.push({...snake[snake.length-1]});
+  }
   lastHitTime=now();
   if(people.length<3)spawnGroup();
   if(Math.random()<.25)spawnGroup();
@@ -229,8 +269,9 @@ function step(){
   snake.pop();
   combo=0;
  }
- // moral mode trigger
- if(!moralMode && now()-lastHitTime>MORAL_TRIGGER_MS) enterMoralMode();
+ // moral mode trigger (drift overrides)
+ if(!moralMode && !driftMode && now()-lastHitTime>MORAL_TRIGGER_MS) enterMoralMode();
+ updateDriftBtn();
 }
 
 function moralTick(){
@@ -260,38 +301,54 @@ function segDir(i){
  return {x:Math.sign(a.x-b.x), y:Math.sign(a.y-b.y)};
 }
 
+function drawCar(s,sd){
+ const cx=s.x*S+S/2, cy=s.y*S+S/2;
+ if(sd.y!==0){
+  const rot=sd.y>0?Math.PI/2:-Math.PI/2;
+  drawSprite(X,IMG.trolley,cx,cy,S*1.1,S*0.92,rot);
+ }else{
+  const flipX=sd.x<0?-1:1;
+  X.save();
+  X.translate(cx,cy);
+  X.scale(flipX,1);
+  const w=S*1.1, h=S*0.95;
+  X.drawImage(IMG.side,-w/2,-h/2,w,h);
+  X.restore();
+ }
+}
+
 function drawSnake(){
- // back to front so head sits on top
  for(let i=snake.length-1;i>=0;i--){
   const s=snake[i];
   let sd=segDir(i);
   if(sd.x===0&&sd.y===0)sd=dir;
-  const cx=s.x*S+S/2, cy=s.y*S+S/2;
-  if(sd.y!==0){
-   // vertical motion → top-down sprite, rotated
-   const rot=sd.y>0?Math.PI/2:-Math.PI/2;
-   drawSprite(X,IMG.trolley,cx,cy,S*1.1,S*0.92,rot);
-  }else{
-   // horizontal motion → side view, flipped when going left
-   const flipX=sd.x<0?-1:1;
-   X.save();
-   X.translate(cx,cy);
-   X.scale(flipX,1);
-   const w=S*1.1, h=S*0.95;
-   X.drawImage(IMG.side,-w/2,-h/2,w,h);
-   X.restore();
+  drawCar(s,sd);
+  // when drifting, draw a partner car perpendicular to motion
+  if(driftMode){
+   const partner = sd.y===0 ? {x:s.x,y:s.y+1} : {x:s.x+1,y:s.y};
+   drawCar(partner,sd);
   }
  }
- // driver dot at head
+ // driver dot
  const head=snake[0];
  const hx=head.x*S+S/2, hy=head.y*S+S/2;
  X.fillStyle='#c00';
  X.beginPath();
  X.arc(hx+dir.x*S*0.25, hy+dir.y*S*0.25, 2.5, 0, Math.PI*2);
  X.fill();
+ // drift mode banner
+ if(driftMode){
+  X.fillStyle='rgba(180,0,0,.85)';
+  X.fillRect(0,C.height-18,C.width,18);
+  X.fillStyle='#fff';
+  X.font='bold 11px monospace';
+  X.textAlign='center';
+  X.fillText('恶 魔 模 式  DEMON DRIFT',C.width/2,C.height-5);
+ }
 }
 
 function draw(){
+ updateDriftBtn();
  // moral mode tinted background
  X.fillStyle=moralMode?'#f8f4e8':'#fff';X.fillRect(0,0,C.width,C.height);
  // tracks (subtle)
@@ -389,9 +446,12 @@ function hideOvr(){
 }
 
 addEventListener('keydown',e=>{
+ if(e.key===' '){activateDrift();e.preventDefault();return}
  const m={ArrowUp:'u',ArrowDown:'d',ArrowLeft:'l',ArrowRight:'r',w:'u',s:'d',a:'l',d:'r',W:'u',S:'d',A:'l',D:'r'}[e.key];
  if(m){setDir(m);e.preventDefault()}
 });
+document.getElementById('driftBtn').addEventListener('click',activateDrift);
+document.getElementById('driftBtn').addEventListener('touchstart',e=>{e.preventDefault();activateDrift()},{passive:false});
 function setDir(k){
  const d={u:{x:0,y:-1},d:{x:0,y:1},l:{x:-1,y:0},r:{x:1,y:0}}[k];
  if(d&&(d.x!=-dir.x||d.y!=-dir.y))nd=d;
