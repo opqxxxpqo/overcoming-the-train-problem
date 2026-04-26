@@ -63,11 +63,17 @@ const SPRITE_DATA = {
 const C=document.getElementById('c'),X=C.getContext('2d');
 const LC=document.getElementById('lc'),LX=LC.getContext('2d');
 const G=12,S=24;
+const LEVER_POS={x:6,y:1};
+const MORAL_TRIGGER_MS=10000;
+const GHOST_BLINK_MS=800;
+const GHOST_LIFE_MS=3800;
 let snake=[{x:6,y:6},{x:5,y:6},{x:4,y:6}];
 let dir={x:1,y:0},nd={x:1,y:0};
 let people=[];
 let score=0,combo=0,tick=0,speed=18,paused=true,alive=false;
+let lastHitTime=0,moralMode=false,moralStart=0,lastGhostSpawn=0;
 const rnd=n=>Math.floor(Math.random()*n);
+const now=()=>Date.now();
 
 const IMG={};
 function loadImg(src){return new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src=src})}
@@ -84,8 +90,58 @@ function reset(){
  snake=[{x:6,y:6},{x:5,y:6},{x:4,y:6}];
  dir={x:1,y:0};nd={x:1,y:0};
  people=[];score=0;combo=0;tick=0;
+ lastHitTime=now();moralMode=false;moralStart=0;lastGhostSpawn=0;
  spawnGroup();spawnGroup();
  alive=true;hideOvr();
+}
+
+function enterMoralMode(){
+ moralMode=true;
+ moralStart=now();
+ people=[];
+ combo=0;
+ lastGhostSpawn=now();
+}
+
+function moralScore(){
+ if(!moralMode)return 0;
+ return Math.floor((now()-moralStart)/200);
+}
+
+function spawnGhostPerson(){
+ for(let i=0;i<30;i++){
+  const x=rnd(G),y=rnd(G);
+  if(snake.some(s=>s.x===x&&s.y===y))continue;
+  if(people.some(p=>p.x===x&&p.y===y))continue;
+  if(x===LEVER_POS.x&&y===LEVER_POS.y)continue;
+  // avoid spawning right in front of head
+  const fx=snake[0].x+dir.x, fy=snake[0].y+dir.y;
+  if(x===fx&&y===fy)continue;
+  people.push({x,y,ghost:true,spawnTime:now()});
+  return;
+ }
+}
+
+function reapGhosts(){
+ if(!moralMode)return;
+ const t=now();
+ people=people.filter(p=>!p.ghost||(t-p.spawnTime)<GHOST_LIFE_MS);
+}
+
+function ghostAlpha(p){
+ if(!p.ghost)return 1;
+ const t=now()-p.spawnTime;
+ if(t<GHOST_BLINK_MS){
+  // blink: 200ms on/off
+  return Math.floor(t/200)%2===0?0.55:0.05;
+ }
+ return 1;
+}
+
+function ghostSolid(p){
+ if(!p.ghost)return true;
+ const t=now()-p.spawnTime;
+ return t>=GHOST_BLINK_MS && t<GHOST_LIFE_MS;
 }
 
 function spawnGroup(){
@@ -101,6 +157,7 @@ function spawnGroup(){
   for(const c of cells){
    if(snake.some(s=>s.x==c.x&&s.y==c.y)){ok=false;break}
    if(people.some(p=>p.x==c.x&&p.y==c.y)){ok=false;break}
+   if(c.x===LEVER_POS.x&&c.y===LEVER_POS.y){ok=false;break}
   }
   if(ok){people.push(...cells);return}
  }
@@ -109,24 +166,62 @@ function spawnGroup(){
 function step(){
  if(nd.x!=-dir.x||nd.y!=-dir.y)dir=nd;
  const h={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
+ // hidden ending 1: hit the lever person on field
+ if(h.x===LEVER_POS.x && h.y===LEVER_POS.y){
+  alive=false;
+  const total=score+moralScore();
+  showEndOvr('???',
+   '【隐藏结局：弑己】\n你撞死了拿扳道杆的自己\n再没人能控制电车了\n总分 '+total);
+  return;
+ }
+ // wall / self collision
  if(h.x<0||h.y<0||h.x>=G||h.y>=G||snake.slice(0,-1).some(s=>s.x==h.x&&s.y==h.y)){
   alive=false;
-  const verdict=score<5?'新手扳道工':score<15?'冷血驾驶员':score<30?'功利主义信徒':'电车难题大师';
-  showEndOvr('GAME OVER','撞死 '+score+' 个人\n'+verdict);
+  if(moralMode){
+   const sec=Math.floor((now()-moralStart)/1000);
+   showEndOvr('GAME OVER','道德高尚 '+sec+' 秒\n撞墙了\n总分 '+(score+moralScore()));
+  }else{
+   const verdict=score<5?'新手扳道工':score<15?'冷血驾驶员':score<30?'功利主义信徒':'电车难题大师';
+   showEndOvr('GAME OVER','撞死 '+score+' 个人\n'+verdict);
+  }
   return;
  }
  snake.unshift(h);
- const idx=people.findIndex(p=>p.x==h.x&&p.y==h.y);
+ // person collision (only if solid)
+ const idx=people.findIndex(p=>p.x===h.x&&p.y===h.y&&ghostSolid(p));
  if(idx>=0){
+  if(moralMode){
+   // hidden ending 2 fail: hit a person while ascended
+   alive=false;
+   const sec=Math.floor((now()-moralStart)/1000);
+   showEndOvr('道德破产',
+    '【隐藏结局：堕落】\n坚持 '+sec+' 秒后还是没忍住\n总分 '+(score+moralScore()));
+   return;
+  }
   people.splice(idx,1);
   combo++;
   score+=combo;
   for(let i=1;i<combo;i++)snake.push({...snake[snake.length-1]});
+  lastHitTime=now();
   if(people.length<3)spawnGroup();
   if(Math.random()<.25)spawnGroup();
  }else{
   snake.pop();
   combo=0;
+ }
+ // moral mode trigger
+ if(!moralMode && now()-lastHitTime>MORAL_TRIGGER_MS) enterMoralMode();
+}
+
+function moralTick(){
+ if(!moralMode||!alive)return;
+ reapGhosts();
+ // spawn rate ramps up over time
+ const age=(now()-moralStart)/1000;
+ const interval=Math.max(350, 1400 - age*25);
+ if(now()-lastGhostSpawn > interval){
+  spawnGhostPerson();
+  lastGhostSpawn=now();
  }
 }
 
@@ -177,26 +272,53 @@ function drawSnake(){
 }
 
 function draw(){
- X.fillStyle='#fff';X.fillRect(0,0,C.width,C.height);
+ // moral mode tinted background
+ X.fillStyle=moralMode?'#f8f4e8':'#fff';X.fillRect(0,0,C.width,C.height);
  // tracks (subtle)
  X.strokeStyle='#ddd';X.lineWidth=1;
  for(let y=0;y<G;y++){
   X.beginPath();X.moveTo(0,y*S+S*0.3);X.lineTo(C.width,y*S+S*0.3);X.stroke();
   X.beginPath();X.moveTo(0,y*S+S*0.7);X.lineTo(C.width,y*S+S*0.7);X.stroke();
  }
- // ties (sleepers)
  X.fillStyle='#eee';
  for(let y=0;y<G;y++)for(let x=0;x<G;x+=2){
   X.fillRect(x*S+S*0.15,y*S+S*0.25,S*0.25,S*0.5);
  }
- // people (standing tied person, narrow tall sprite)
+ // lever person on field (always present, hitting him = ending 1)
+ if(IMG.lever){
+  const cx=LEVER_POS.x*S+S/2, cy=LEVER_POS.y*S+S/2;
+  // subtle pulse halo so player notices him
+  const pulse=0.5+0.5*Math.sin(now()/400);
+  X.save();
+  X.globalAlpha=0.15*pulse;
+  X.fillStyle='#c00';
+  X.beginPath();X.arc(cx,cy,S*0.7,0,Math.PI*2);X.fill();
+  X.restore();
+  drawSprite(X,IMG.lever,cx,cy,S*0.85,S*0.85,0);
+ }
+ // people (with optional ghost alpha)
  if(IMG.single)people.forEach(p=>{
   const cx=p.x*S+S/2, cy=p.y*S+S/2;
+  X.save();
+  X.globalAlpha=ghostAlpha(p);
   drawSprite(X,IMG.single,cx,cy,S*0.5,S*0.95,0);
+  X.restore();
  });
  if(IMG.trolley)drawSnake();
- const c=combo>1?' x'+combo:'';
- document.getElementById('hud').innerText='SCORE '+String(score).padStart(4,'0')+c;
+ // moral mode banner overlay
+ if(moralMode){
+  X.fillStyle='rgba(180,140,40,.85)';
+  X.fillRect(0,0,C.width,18);
+  X.fillStyle='#fff';
+  X.font='bold 11px monospace';
+  X.textAlign='center';
+  X.fillText('道 德 高 尚 模 式  MORAL',C.width/2,13);
+ }
+ // HUD
+ const total=score+moralScore();
+ const moralPart=moralMode?' [道德 +'+moralScore()+']':'';
+ const comboPart=combo>1?' x'+combo:'';
+ document.getElementById('hud').innerText='SCORE '+String(total).padStart(4,'0')+comboPart+moralPart;
  drawLever();
 }
 
@@ -263,7 +385,10 @@ document.getElementById('ovr').onclick=()=>{ if(!alive) reset() };
 
 loadAll().then(()=>{
  function loop(){
-  if(alive&&!paused){tick++;if(tick>=speed){step();tick=0}}
+  if(alive&&!paused){
+   tick++;if(tick>=speed){step();tick=0}
+   moralTick();
+  }
   draw();
   requestAnimationFrame(loop);
  }
