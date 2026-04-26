@@ -72,8 +72,9 @@ const GHOST_LIFE_MS=3800;
 let snake=[{x:6,y:6},{x:5,y:6},{x:4,y:6}];
 let dir={x:1,y:0},nd={x:1,y:0};
 let people=[];
-let score=0,combo=0,tick=0,speed=18,paused=true,alive=false;
+let score=0,combo=0,tick=0,speed=26,paused=true,alive=false;
 let lastHitTime=0,moralMode=false,moralStart=0,lastGhostSpawn=0;
+let countdown=0;
 const rnd=n=>Math.floor(Math.random()*n);
 const now=()=>Date.now();
 
@@ -88,13 +89,32 @@ async function loadAll(){
  document.getElementById('splash').src = SPRITE_DATA.meme;
 }
 
-function reset(){
+function prepareGame(){
  snake=[{x:6,y:6},{x:5,y:6},{x:4,y:6}];
  dir={x:1,y:0};nd={x:1,y:0};
  people=[];score=0;combo=0;tick=0;
  lastHitTime=now();moralMode=false;moralStart=0;lastGhostSpawn=0;
  spawnGroup();spawnGroup();
- alive=true;hideOvr();
+ alive=false;
+}
+
+function reset(){
+ prepareGame();
+ hideOvr();
+ // 3-2-1-GO countdown drawn over the canvas
+ paused=false;
+ let n=3;countdown=n;
+ const iv=setInterval(()=>{
+  n--;
+  if(n>0)countdown=n;
+  else if(n===0)countdown=4; // 4 = "GO!"
+  else{
+   clearInterval(iv);
+   countdown=0;
+   lastHitTime=now();
+   alive=true;
+  }
+ },700);
 }
 
 function enterMoralMode(){
@@ -293,6 +313,18 @@ function draw(){
   X.restore();
  });
  if(IMG.trolley)drawSnake();
+ // countdown overlay
+ if(countdown>0){
+  X.save();
+  X.fillStyle='rgba(255,255,255,0.55)';
+  X.fillRect(0,0,C.width,C.height);
+  X.fillStyle='#c00';
+  X.font='bold 110px monospace';
+  X.textAlign='center';X.textBaseline='middle';
+  const text=countdown===4?'GO!':String(countdown);
+  X.fillText(text,C.width/2,C.height/2);
+  X.restore();
+ }
  // moral mode banner overlay
  if(moralMode){
   X.fillStyle='rgba(180,140,40,.85)';
